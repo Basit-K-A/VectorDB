@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: LogFormat = LogFormat.TEXT
 
+    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_cache_enabled: bool = True
+    embedding_cache_size: int = Field(default=1024, ge=0)
+
     @property
     def is_development(self) -> bool:
         return self.environment == Environment.DEVELOPMENT
