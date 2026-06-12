@@ -17,7 +17,6 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.0",
-    "scipy>=1.14.0",
     "sentence-transformers>=3.3.0",
 ]
 

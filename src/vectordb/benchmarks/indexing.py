@@ -26,6 +26,7 @@ class IndexBenchmarkConfig:
     metric: SimilarityMetric = SimilarityMetric.COSINE
     leafsize: int = 16
     eps: float = 0.0
+    search_depth: int = 128
     seed: int = 42
 
 
@@ -102,7 +103,7 @@ def _recall_at_k(
 def run_index_benchmark(
     config: IndexBenchmarkConfig | None = None,
 ) -> IndexBenchmarkResult:
-    """Benchmark KD Tree ANN search against brute-force search."""
+    """Benchmark HNSW ANN search against brute-force search."""
     resolved = config or IndexBenchmarkConfig()
     documents, items, query = _build_dataset(resolved)
 
@@ -110,6 +111,8 @@ def run_index_benchmark(
         leafsize=resolved.leafsize,
         eps=resolved.eps,
         metric=resolved.metric,
+        search_depth=resolved.search_depth,
+        seed=resolved.seed,
     )
     index.insert_many(items)
 

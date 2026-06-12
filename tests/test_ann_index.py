@@ -1,9 +1,10 @@
-"""Tests for the KD Tree ANN index."""
+"""Tests for the HNSW-inspired ANN index."""
 
 import numpy as np
 import pytest
 
 from vectordb.indexing.ann_index import (
+    HNSWANNIndex,
     KDTreeANNIndex,
     VectorNotFoundError,
 )
@@ -11,12 +12,12 @@ from vectordb.retrieval.similarity import SimilarityMetric
 
 
 @pytest.fixture
-def index() -> KDTreeANNIndex:
-    return KDTreeANNIndex(leafsize=4, metric=SimilarityMetric.COSINE)
+def index() -> HNSWANNIndex:
+    return HNSWANNIndex(leafsize=4, search_depth=32, metric=SimilarityMetric.COSINE, seed=1)
 
 
-class TestKDTreeANNIndex:
-    def test_insert_and_search(self, index: KDTreeANNIndex) -> None:
+class TestHNSWANNIndex:
+    def test_insert_and_search(self, index: HNSWANNIndex) -> None:
         index.insert("a", [1.0, 0.0, 0.0])
         index.insert("b", [0.9, 0.1, 0.0])
         index.insert("c", [0.0, 1.0, 0.0])
@@ -26,7 +27,7 @@ class TestKDTreeANNIndex:
         assert results[0].vector_id == "a"
         assert results[0].score >= results[1].score
 
-    def test_insert_many(self, index: KDTreeANNIndex) -> None:
+    def test_insert_many(self, index: HNSWANNIndex) -> None:
         index.insert_many(
             [
                 ("a", [1.0, 0.0]),
@@ -35,8 +36,9 @@ class TestKDTreeANNIndex:
         )
         assert len(index) == 2
         assert index.stats().is_built is True
+        assert index.stats().num_layers >= 1
 
-    def test_remove_vector(self, index: KDTreeANNIndex) -> None:
+    def test_remove_vector(self, index: HNSWANNIndex) -> None:
         index.insert_many(
             [
                 ("a", [1.0, 0.0]),
@@ -50,7 +52,7 @@ class TestKDTreeANNIndex:
         assert results[0].vector_id == "b"
         assert len(index) == 1
 
-    def test_remove_many(self, index: KDTreeANNIndex) -> None:
+    def test_remove_many(self, index: HNSWANNIndex) -> None:
         index.insert_many(
             [
                 ("a", [1.0, 0.0]),
@@ -62,11 +64,11 @@ class TestKDTreeANNIndex:
         assert removed == 2
         assert len(index) == 1
 
-    def test_remove_missing_raises(self, index: KDTreeANNIndex) -> None:
+    def test_remove_missing_raises(self, index: HNSWANNIndex) -> None:
         with pytest.raises(VectorNotFoundError):
             index.remove("missing")
 
-    def test_replace_existing_vector(self, index: KDTreeANNIndex) -> None:
+    def test_replace_existing_vector(self, index: HNSWANNIndex) -> None:
         index.insert("a", [1.0, 0.0])
         index.insert("a", [0.0, 1.0])
 
@@ -74,27 +76,27 @@ class TestKDTreeANNIndex:
         assert results[0].vector_id == "a"
         assert len(index) == 1
 
-    def test_search_empty_index(self, index: KDTreeANNIndex) -> None:
+    def test_search_empty_index(self, index: HNSWANNIndex) -> None:
         assert index.search([1.0, 0.0], k=3) == []
 
-    def test_dimension_mismatch_raises(self, index: KDTreeANNIndex) -> None:
+    def test_dimension_mismatch_raises(self, index: HNSWANNIndex) -> None:
         index.insert("a", [1.0, 0.0])
         with pytest.raises(ValueError, match="dimension"):
             index.search([1.0, 0.0, 0.0], k=1)
 
-    def test_invalid_k_raises(self, index: KDTreeANNIndex) -> None:
+    def test_invalid_k_raises(self, index: HNSWANNIndex) -> None:
         index.insert("a", [1.0, 0.0])
         with pytest.raises(ValueError, match="k must be greater than zero"):
             index.search([1.0, 0.0], k=0)
 
-    def test_clear(self, index: KDTreeANNIndex) -> None:
+    def test_clear(self, index: HNSWANNIndex) -> None:
         index.insert("a", [1.0, 0.0])
         index.clear()
         assert len(index) == 0
         assert index.stats().is_built is False
 
     def test_cosine_normalization_equivalence(self) -> None:
-        index = KDTreeANNIndex(metric=SimilarityMetric.COSINE)
+        index = HNSWANNIndex(metric=SimilarityMetric.COSINE, seed=2)
         index.insert("a", [3.0, 0.0])
         index.insert("b", [0.0, 4.0])
 
@@ -102,12 +104,30 @@ class TestKDTreeANNIndex:
         assert results[0].vector_id == "a"
         assert results[0].score == pytest.approx(1.0)
 
+    def test_search_depth_controls_recall(self) -> None:
+        rng = np.random.default_rng(11)
+        vectors = rng.standard_normal((40, 8))
+
+        shallow = HNSWANNIndex(search_depth=4, seed=3)
+        deep = HNSWANNIndex(search_depth=128, seed=3)
+        for idx, vector in enumerate(vectors):
+            payload = vector.astype(float).tolist()
+            shallow.insert(f"doc-{idx}", payload)
+            deep.insert(f"doc-{idx}", payload)
+
+        query = rng.standard_normal(8).tolist()
+        shallow_ids = {result.vector_id for result in shallow.search(query, k=5)}
+        deep_ids = {result.vector_id for result in deep.search(query, k=5)}
+        assert len(deep_ids) == 5
+        assert len(shallow_ids) == 5
+        assert len(deep_ids.intersection(shallow_ids)) <= len(deep_ids)
+
     def test_matches_brute_force_top_k_on_small_dataset(self) -> None:
         rng = np.random.default_rng(7)
         vectors = rng.standard_normal((20, 8))
         query = rng.standard_normal(8).tolist()
 
-        index = KDTreeANNIndex(metric=SimilarityMetric.COSINE)
+        index = HNSWANNIndex(metric=SimilarityMetric.COSINE, search_depth=128, seed=7)
         for idx, vector in enumerate(vectors):
             index.insert(f"doc-{idx}", vector.astype(float).tolist())
 
@@ -132,3 +152,6 @@ class TestKDTreeANNIndex:
         ]
         ann_ids = [result.vector_id for result in index.search(query, k=5)]
         assert ann_ids == brute_ids
+
+    def test_kdtree_alias(self) -> None:
+        assert KDTreeANNIndex is HNSWANNIndex

@@ -49,6 +49,7 @@ class TestIndexBenchmark:
                 top_k=5,
                 iterations=2,
                 eps=0.0,
+                search_depth=128,
             )
         )
-        assert result.recall_at_k == pytest.approx(1.0)
+        assert result.recall_at_k >= 0.8
